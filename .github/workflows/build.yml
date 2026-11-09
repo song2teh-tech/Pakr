@@ -121,47 +121,66 @@ jobs:
 
       - name: Sign APK
         env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           IN_APP_NAME: ${{ github.event.inputs.app_name }}
           IN_VERSION_NAME: ${{ github.event.inputs.version_name }}
         run: |
-          KS_B64="${{ secrets.KEYSTORE_BASE64 }}"
-          if [ -n "$KS_B64" ]; then
-            echo "$KS_B64" | base64 --decode > /tmp/release.keystore
-            KS_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
-            KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
-            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Using provided keystore..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+            KS_PASS="$KEYSTORE_PASSWORD"
+            ALIAS="$KEY_ALIAS"
+            K_PASS="$KEY_PASSWORD"
           else
+            echo "Generating debug keystore (No secrets provided)..."
             keytool -genkey -v -keystore /tmp/release.keystore -alias debugkey -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname "CN=Debug,O=Debug,C=US" -noprompt
             KS_PASS="android"
-            KEY_ALIAS="debugkey"
-            KEY_PASS="android"
+            ALIAS="debugkey"
+            K_PASS="android"
           fi
+          
           BUILD_TOOLS=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
           SAFE=$(printf '%s' "$IN_APP_NAME" | tr -c 'A-Za-z0-9_-' '_')
           VER="$IN_VERSION_NAME"
           mkdir -p /tmp/signed
+          
           echo "=== Searching for split APK files ==="
           find app/build -name '*.apk' 2>/dev/null || echo "No APK found in app/build"
           FOUND=0
+          
           while IFS= read -r APK; do
             [ -z "$APK" ] && continue
             echo "Processing: $APK"
             ABI=$(echo "$APK" | grep -oE 'arm64-v8a|armeabi-v7a' | head -1)
             [ -z "$ABI" ] && continue
             OUT="/tmp/signed/${SAFE}_${VER}_${ABI}.apk"
+            
             $ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign -v -p 4 "$APK" /tmp/aligned_${ABI}.apk
-            $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign               --ks /tmp/release.keystore --ks-pass "pass:$KS_PASS"               --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASS"               --out "$OUT" /tmp/aligned_${ABI}.apk
+            
+            $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign \
+              --ks /tmp/release.keystore \
+              --ks-pass "pass:$KS_PASS" \
+              --ks-key-alias "$ALIAS" \
+              --key-pass "pass:$K_PASS" \
+              --out "$OUT" /tmp/aligned_${ABI}.apk
+              
             $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner verify "$OUT"
             echo "Signed: $OUT"
             FOUND=1
           done < <(find app/build -type f \( -name '*arm64-v8a*release*.apk' -o -name '*armeabi-v7a*release*.apk' -o -path '*/release/*arm64-v8a*.apk' -o -path '*/release/*armeabi-v7a*.apk' \) 2>/dev/null)
+          
           if [ "$FOUND" -ne 1 ]; then
             echo "No split ABI APKs found" >&2
             exit 1
           fi
+          
           ls -la /tmp/signed/
           echo "SIGNED_DIR=/tmp/signed" >> $GITHUB_ENV
           echo "APK_NAME=${SAFE}_${VER}" >> $GITHUB_ENV
+
       - name: Upload arm64 APK
         uses: actions/upload-artifact@v4
         with:
