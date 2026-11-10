@@ -35,15 +35,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Cache Gradle dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-
       - name: Inject parameters and fix manifest
         env:
           IN_APP_URL: ${{ github.event.inputs.app_url }}
@@ -52,7 +43,7 @@ jobs:
           IN_VERSION_NAME: ${{ github.event.inputs.version_name }}
         run: |
           python3 - <<'PY'
-          import os
+          import os, shutil
 
           def replace_in_file(path, mapping):
               with open(path, 'r', encoding='utf-8') as f:
@@ -67,33 +58,24 @@ jobs:
           pkg = os.environ['IN_PACKAGE_NAME']
           ver = os.environ['IN_VERSION_NAME']
 
-          # آپدیت فایل‌های اصلی
+          # 1. Update MainActivity
           replace_in_file('app/src/main/java/com/webviewapp/MainActivity.kt', {'{{APP_URL}}': app_url})
+
+          # 2. Update strings.xml
           replace_in_file('app/src/main/res/values/strings.xml', {'{{APP_NAME}}': app_name})
 
-          # انتقال پوشه پکیج
+          # 3. Move package directory
           pkg_path = pkg.replace('.', '/')
           os.makedirs(f'app/src/main/java/{pkg_path}', exist_ok=True)
           kt_dir = 'app/src/main/java/com/webviewapp'
-          for fname in os.listdir(kt_dir):
-              if fname.endswith('.kt'):
-                  fpath = os.path.join(kt_dir, fname)
-                  replace_in_file(fpath, {'package com.webviewapp': f'package {pkg}'})
-                  os.rename(fpath, os.path.join(f'app/src/main/java/{pkg_path}', fname))
+          if os.path.exists(kt_dir):
+              for fname in os.listdir(kt_dir):
+                  if fname.endswith('.kt'):
+                      fpath = os.path.join(kt_dir, fname)
+                      replace_in_file(fpath, {'package com.webviewapp': f'package {pkg}'})
+                      shutil.move(fpath, os.path.join(f'app/src/main/java/{pkg_path}', fname))
 
-          # 🔥 ساخت فایل themes.xml از صفر (حل مشکل Theme)
-          os.makedirs('app/src/main/res/values', exist_ok=True)
-          themes_xml = """<?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="Theme.WebViewApp" parent="Theme.AppCompat.Light.NoActionBar">
-                  <item name="android:windowBackground">@android:color/white</item>
-              </style>
-          </resources>
-          """
-          with open('app/src/main/res/values/themes.xml', 'w', encoding='utf-8') as f:
-              f.write(themes_xml)
-
-          # 🔥 ساخت فایل AndroidManifest.xml از صفر (حل مشکل package)
+          # 4. Overwrite AndroidManifest.xml COMPLETELY (No theme, No package attribute)
           manifest_xml = f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -102,8 +84,7 @@ jobs:
                   android:icon="@mipmap/ic_launcher"
                   android:label="{app_name}"
                   android:roundIcon="@mipmap/ic_launcher_round"
-                  android:supportsRtl="true"
-                  android:theme="@style/Theme.WebViewApp">
+                  android:supportsRtl="true">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -115,6 +96,9 @@ jobs:
           """
           with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
               f.write(manifest_xml)
+
+          # 5. Update build.gradle
+          replace_in_file('app/build.gradle', {'{{APP_PACKAGE}}': pkg, '{{VERSION_NAME}}': ver})
           PY
 
       - name: Ensure fallback launcher resources
@@ -141,7 +125,7 @@ jobs:
       - name: Build APK (arm64 + armeabi-v7a)
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew clean assembleRelease --no-daemon
 
       - name: Sign APK
         env:
