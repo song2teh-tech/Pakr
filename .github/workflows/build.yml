@@ -1,9 +1,9 @@
-name: Build Clean APK
+name: Build Final APK
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'آدرس سایت'
+        description: 'آدرس سایت (مثلاً https://example.com)'
         required: true
       name:
         description: 'نام برنامه'
@@ -18,15 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
-      - name: Rebuild Project Files
+      - name: Create clean project structure
         env:
           URL: ${{ github.event.inputs.url }}
           NAME: ${{ github.event.inputs.name }}
@@ -35,8 +36,11 @@ jobs:
           python3 - <<'PY'
           import os, shutil
           
-          # پاکسازی کامل فایل‌های قدیمی
+          # پاکسازی کامل تمام فایل‌های قبلی
           shutil.rmtree('app', ignore_errors=True)
+          if os.path.exists('build.gradle'): os.remove('build.gradle')
+          if os.path.exists('settings.gradle'): os.remove('settings.gradle')
+          
           os.makedirs('app/src/main/java/com/myapp')
           os.makedirs('app/src/main/res/mipmap-hdpi')
           os.makedirs('app/src/main/res/values')
@@ -45,8 +49,8 @@ jobs:
           name = os.environ['NAME']
           icon = os.environ['ICON']
           
-          # ساخت فایل settings.gradle با تعریف مخازن پلاگین (حل مشکل اصلی)
-          settings_code = """
+          # 1. ساخت فایل settings.gradle
+          settings = """
           pluginManagement {
               repositories {
                   google()
@@ -64,13 +68,13 @@ jobs:
           rootProject.name = "MyApp"
           include ':app'
           """
-          with open('settings.gradle', 'w') as f: f.write(settings_code)
+          with open('settings.gradle', 'w') as f: f.write(settings)
           
-          # ساخت فایل build.gradle اصلی
-          with open('build.gradle', 'w') as f: 
+          # 2. ساخت فایل build.gradle اصلی
+          with open('build.gradle', 'w') as f:
               f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
           
-          # ساخت فایل build.gradle مربوط به اپ
+          # 3. ساخت فایل build.gradle اپلیکیشن
           app_gradle = """
           plugins { id 'com.android.application' }
           android {
@@ -84,7 +88,7 @@ jobs:
           """
           with open('app/build.gradle', 'w') as f: f.write(app_gradle)
           
-          # ساخت مانیفست
+          # 4. ساخت AndroidManifest.xml
           manifest = f"""
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -98,7 +102,7 @@ jobs:
           """
           with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(manifest)
           
-          # ساخت اکتیویتی جاوا
+          # 5. ساخت MainActivity.java
           activity = f"""
           package com.myapp;
           import android.os.Bundle; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity;
@@ -112,23 +116,29 @@ jobs:
           """
           with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(activity)
           
-          # مدیریت آیکون
+          # 6. مدیریت آیکون (با پشتیبانی از خطای دانلود)
           if icon:
               os.system(f'curl -sL "{icon}" -o app/src/main/res/mipmap-hdpi/ic_launcher.png')
-          if not os.path.exists('app/src/main/res/mipmap-hdpi/ic_launcher.png'):
+          if not os.path.exists('app/src/main/res/mipmap-hdpi/ic_launcher.png') or os.path.getsize('app/src/main/res/mipmap-hdpi/ic_launcher.png') == 0:
               open('app/src/main/res/mipmap-hdpi/ic_launcher.png', 'wb').write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82')
           PY
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Build and Sign
+      - name: Build and Sign APK
         env:
           KS: ${{ secrets.KEYSTORE_BASE64 }}
           KP: ${{ secrets.KEYSTORE_PASSWORD }}
           KA: ${{ secrets.KEY_ALIAS }}
           KKP: ${{ secrets.KEY_PASSWORD }}
         run: |
-          gradle wrapper --gradle-version 8.0 && chmod +x gradlew && ./gradlew assembleRelease
+          # 1. تنظیم Gradle Wrapper روی نسخه 8.0 (سازگار با AGP 8.1.4)
+          gradle wrapper --gradle-version 8.0
+          chmod +x ./gradlew
           
+          # 2. ساخت فایل APK
+          ./gradlew assembleRelease
+          
+          # 3. آماده‌سازی امضا
           if [ -n "$KS" ]; then
             echo "$KS" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1 | base64 -d > k.keystore
             P="$KP"; A="$KA"; PP="$KKP"
@@ -137,14 +147,15 @@ jobs:
             P="android"; A="d"; PP="android"
           fi
           
+          # 4. امضای نهایی فایل APK
           BT=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
           APK_PATH=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
           
           $ANDROID_HOME/build-tools/$BT/zipalign -v -p 4 "$APK_PATH" aligned.apk
           $ANDROID_HOME/build-tools/$BT/apksigner sign --ks k.keystore --ks-pass "pass:$P" --ks-key-alias "$A" --key-pass "pass:$PP" --out final.apk aligned.apk
       
-      - name: Upload APK
+      - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: Final-App
+          name: Final-APK
           path: final.apk
