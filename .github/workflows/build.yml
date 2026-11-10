@@ -130,8 +130,8 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "Using provided keystore..."
-            # پاکسازی کامل کاراکترهای اضافی (فاصله، خط جدید، بازگشت خط)
-            CLEAN_B64=$(echo "$KEYSTORE_BASE64" | tr -d ' \n\r\t')
+            # این خط معجزه می‌کند: هر چیزی غیر از حروف و اعداد و + و / و = را حذف می‌کند
+            CLEAN_B64=$(echo "$KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=')
             echo "$CLEAN_B64" | base64 --decode > /tmp/release.keystore
             KS_PASS="$KEYSTORE_PASSWORD"
             ALIAS="$KEY_ALIAS"
