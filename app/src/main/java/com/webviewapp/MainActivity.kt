@@ -11,17 +11,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // ساخت مستقیم WebView بدون هیچ صفحه واسط
         val webView = WebView(this)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        
-        // جلوگیری از باز شدن لینک‌ها در مرورگر بیرونی
         webView.webViewClient = WebViewClient()
         
         setContentView(webView)
-        
-        // لود کردن مستقیم آدرس سایت
         webView.loadUrl("{{APP_URL}}")
     }
 }
