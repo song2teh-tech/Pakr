@@ -27,7 +27,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      # 🔥 نصب اجباری Gradle نسخه 8.0 قبل از هر کاری
       - name: Setup Gradle 8.0
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -40,7 +39,7 @@ jobs:
           ICON: ${{ github.event.inputs.icon }}
         run: |
           python3 - <<'PY'
-          import os, shutil
+          import os, shutil, textwrap
           
           # پاکسازی کامل
           shutil.rmtree('app', ignore_errors=True)
@@ -54,7 +53,7 @@ jobs:
           name = os.environ['NAME']
           icon = os.environ['ICON']
           
-          settings = """
+          settings = textwrap.dedent("""
           pluginManagement {
               repositories {
                   google()
@@ -71,13 +70,13 @@ jobs:
           }
           rootProject.name = "MyApp"
           include ':app'
-          """
+          """).strip()
           with open('settings.gradle', 'w') as f: f.write(settings)
           
           with open('build.gradle', 'w') as f:
               f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
           
-          app_gradle = """
+          app_gradle = textwrap.dedent("""
           plugins { id 'com.android.application' }
           android {
               namespace 'com.myapp'
@@ -87,11 +86,11 @@ jobs:
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
           }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
-          """
+          """).strip()
           with open('app/build.gradle', 'w') as f: f.write(app_gradle)
           
-          manifest = f"""
-          <?xml version="1.0" encoding="utf-8"?>
+          # حل مشکل خطای XML با strip() تا خط اول خالی نباشد
+          manifest = textwrap.dedent(f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <application android:label="{name}" android:icon="@mipmap/ic_launcher" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
@@ -100,10 +99,10 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          """
+          """).strip()
           with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(manifest)
           
-          activity = f"""
+          activity = textwrap.dedent(f"""
           package com.myapp;
           import android.os.Bundle; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity;
           public class MainActivity extends AppCompatActivity {{
@@ -113,7 +112,7 @@ jobs:
                   setContentView(w); w.loadUrl("{url}");
               }}
           }}
-          """
+          """).strip()
           with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(activity)
           
           if icon:
