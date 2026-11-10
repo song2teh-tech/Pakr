@@ -35,7 +35,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Inject parameters and fix manifest
+      - name: Rebuild all project files cleanly
         env:
           IN_APP_URL: ${{ github.event.inputs.app_url }}
           IN_APP_NAME: ${{ github.event.inputs.app_name }}
@@ -45,45 +45,48 @@ jobs:
           python3 - <<'PY'
           import os, shutil
 
-          def replace_in_file(path, mapping):
-              with open(path, 'r', encoding='utf-8') as f:
-                  content = f.read()
-              for old, new in mapping.items():
-                  content = content.replace(old, new)
-              with open(path, 'w', encoding='utf-8') as f:
-                  f.write(content)
-
           app_url = os.environ['IN_APP_URL']
           app_name = os.environ['IN_APP_NAME']
           pkg = os.environ['IN_PACKAGE_NAME']
           ver = os.environ['IN_VERSION_NAME']
 
-          # محاسبه versionCode از روی versionName (مثلاً 1.0.0 -> 10000)
+          # محاسبه Version Code از روی Version Name
           parts = (ver.split('.') + ['0', '0', '0'])[:3]
           try:
               vc = int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2])
           except ValueError:
               vc = 1
 
-          # 1. Update MainActivity
-          replace_in_file('app/src/main/java/com/webviewapp/MainActivity.kt', {'{{APP_URL}}': app_url})
+          # 1. پاک کردن پوشه‌های قدیمی برای جلوگیری از تداخل
+          if os.path.exists('app/src/main/java/com/webviewapp'):
+              shutil.rmtree('app/src/main/java/com/webviewapp')
 
-          # 2. Update strings.xml
-          replace_in_file('app/src/main/res/values/strings.xml', {'{{APP_NAME}}': app_name})
-
-          # 3. Move package directory
+          # 2. ساخت مجدد MainActivity.kt
           pkg_path = pkg.replace('.', '/')
           os.makedirs(f'app/src/main/java/{pkg_path}', exist_ok=True)
-          kt_dir = 'app/src/main/java/com/webviewapp'
-          if os.path.exists(kt_dir):
-              for fname in os.listdir(kt_dir):
-                  if fname.endswith('.kt'):
-                      fpath = os.path.join(kt_dir, fname)
-                      replace_in_file(fpath, {'package com.webviewapp': f'package {pkg}'})
-                      shutil.move(fpath, os.path.join(f'app/src/main/java/{pkg_path}', fname))
+          main_activity = f"""package {pkg}
+          import android.os.Bundle
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import androidx.appcompat.app.AppCompatActivity
 
-          # 4. Overwrite AndroidManifest.xml COMPLETELY
-          manifest_xml = f"""<?xml version="1.0" encoding="utf-8"?>
+          class MainActivity : AppCompatActivity() {{
+              override fun onCreate(savedInstanceState: Bundle?) {{
+                  super.onCreate(savedInstanceState)
+                  val webView = WebView(this)
+                  webView.settings.javaScriptEnabled = true
+                  webView.settings.domStorageEnabled = true
+                  webView.webViewClient = WebViewClient()
+                  setContentView(webView)
+                  webView.loadUrl("{app_url}")
+              }}
+          }}
+          """
+          with open(f'app/src/main/java/{pkg_path}/MainActivity.kt', 'w', encoding='utf-8') as f:
+              f.write(main_activity)
+
+          # 3. بازنویسی کامل AndroidManifest.xml (بدون هیچ تم خاصی)
+          manifest = f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <application
@@ -91,7 +94,8 @@ jobs:
                   android:icon="@mipmap/ic_launcher"
                   android:label="{app_name}"
                   android:roundIcon="@mipmap/ic_launcher_round"
-                  android:supportsRtl="true">
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -102,14 +106,57 @@ jobs:
           </manifest>
           """
           with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
-              f.write(manifest_xml)
+              f.write(manifest)
 
-          # 5. Update build.gradle (این بار VERSION_CODE هم جایگزین می‌شود)
-          replace_in_file('app/build.gradle', {
-              '{{APP_PACKAGE}}': pkg,
-              '{{VERSION_NAME}}': ver,
-              '{{VERSION_CODE}}': str(vc)
-          })
+          # 4. بازنویسی کامل strings.xml
+          strings = f"""<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">{app_name}</string>
+          </resources>
+          """
+          with open('app/src/main/res/values/strings.xml', 'w', encoding='utf-8') as f:
+              f.write(strings)
+
+          # 5. بازنویسی کامل app/build.gradle (حل قطعی مشکل null)
+          gradle = f"""plugins {{
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }}
+
+          android {{
+              namespace '{pkg}'
+              compileSdk 34
+
+              defaultConfig {{
+                  applicationId "{pkg}"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode {vc}
+                  versionName "{ver}"
+              }}
+
+              buildTypes {{
+                  release {{
+                      minifyEnabled false
+                  }}
+              }}
+              compileOptions {{
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }}
+              kotlinOptions {{
+                  jvmTarget = '17'
+              }}
+          }}
+
+          dependencies {{
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+              implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+          }}
+          """
+          with open('app/build.gradle', 'w', encoding='utf-8') as f:
+              f.write(gradle)
           PY
 
       - name: Ensure fallback launcher resources
