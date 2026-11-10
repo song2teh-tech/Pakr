@@ -58,6 +58,13 @@ jobs:
           pkg = os.environ['IN_PACKAGE_NAME']
           ver = os.environ['IN_VERSION_NAME']
 
+          # محاسبه versionCode از روی versionName (مثلاً 1.0.0 -> 10000)
+          parts = (ver.split('.') + ['0', '0', '0'])[:3]
+          try:
+              vc = int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2])
+          except ValueError:
+              vc = 1
+
           # 1. Update MainActivity
           replace_in_file('app/src/main/java/com/webviewapp/MainActivity.kt', {'{{APP_URL}}': app_url})
 
@@ -75,7 +82,7 @@ jobs:
                       replace_in_file(fpath, {'package com.webviewapp': f'package {pkg}'})
                       shutil.move(fpath, os.path.join(f'app/src/main/java/{pkg_path}', fname))
 
-          # 4. Overwrite AndroidManifest.xml COMPLETELY (No theme, No package attribute)
+          # 4. Overwrite AndroidManifest.xml COMPLETELY
           manifest_xml = f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -97,8 +104,12 @@ jobs:
           with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
               f.write(manifest_xml)
 
-          # 5. Update build.gradle
-          replace_in_file('app/build.gradle', {'{{APP_PACKAGE}}': pkg, '{{VERSION_NAME}}': ver})
+          # 5. Update build.gradle (این بار VERSION_CODE هم جایگزین می‌شود)
+          replace_in_file('app/build.gradle', {
+              '{{APP_PACKAGE}}': pkg,
+              '{{VERSION_NAME}}': ver,
+              '{{VERSION_CODE}}': str(vc)
+          })
           PY
 
       - name: Ensure fallback launcher resources
