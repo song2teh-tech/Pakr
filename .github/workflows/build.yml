@@ -32,7 +32,7 @@ jobs:
         with:
           gradle-version: '8.0'
 
-      - name: Install Pillow for Icon processing
+      - name: Install Pillow
         run: pip install Pillow requests urllib3
 
       - name: Create clean project structure
@@ -43,10 +43,9 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, shutil, textwrap, requests, urllib3
-          from PIL import Image
+          from PIL import Image, ImageDraw, ImageFont
           from io import BytesIO
           
-          # خاموش کردن هشدارهای SSL
           urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           shutil.rmtree('app', ignore_errors=True)
@@ -55,9 +54,6 @@ jobs:
           
           os.makedirs('app/src/main/java/com/myapp')
           os.makedirs('app/src/main/res/mipmap-anydpi-v26')
-          os.makedirs('app/src/main/res/values')
-          
-          # ساخت تمام پوشه‌های آیکون از ابتدا (حل مشکل کرش)
           for d in ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']:
               os.makedirs(f'app/src/main/res/mipmap-{d}', exist_ok=True)
           
@@ -86,21 +82,28 @@ jobs:
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
           """).strip())
           
+          # 🔥 حل مشکل عکس‌های سایت با اضافه کردن usesCleartextTraffic
           with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(textwrap.dedent(f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:label="{name}" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+              <application 
+                  android:label="{name}" 
+                  android:icon="@mipmap/ic_launcher" 
+                  android:roundIcon="@mipmap/ic_launcher" 
+                  android:usesCleartextTraffic="true"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
                   </activity>
               </application>
           </manifest>""").strip())
           
-          # تنظیمات WebView برای نمایش تصاویر HTTP در سایت HTTPS
+          # 🔥 تنظیمات کامل WebView برای لود شدن تمام عکس‌ها و اسکریپت‌ها
           with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(textwrap.dedent(f"""
           package com.myapp;
           import android.os.Build;
           import android.os.Bundle;
+          import android.webkit.WebChromeClient;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
@@ -114,24 +117,25 @@ jobs:
                   WebSettings webSettings = webView.getSettings();
                   webSettings.setJavaScriptEnabled(true);
                   webSettings.setDomStorageEnabled(true);
+                  webSettings.setLoadsImagesAutomatically(true);
+                  webSettings.setBlockNetworkImage(false);
                   
-                  // حل مشکل نمایش تصاویر
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {{
                       webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
                   }}
                   
                   webView.setWebViewClient(new WebViewClient());
+                  webView.setWebChromeClient(new WebChromeClient());
                   setContentView(webView);
                   webView.loadUrl("{url}");
               }}
           }}""").strip())
           
-          # پردازش آیکون با مدیریت خطای کامل
+          # پردازش آیکون با امنیت کامل
           icon_saved = False
           if icon:
               try:
                   headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-                  # استفاده از verify=False برای دور زدن خطای SSL سایت‌های نامعتبر
                   response = requests.get(icon, headers=headers, timeout=15, verify=False)
                   response.raise_for_status()
                   img = Image.open(BytesIO(response.content))
@@ -154,11 +158,12 @@ jobs:
                   print(f"⚠️ Icon processing failed: {e}")
           
           if not icon_saved:
-              print("⚠️ Using fallback icon (App will still build).")
+              # آیکون پیش‌فرض زیبا (آبی رنگ) به جای مربع سیاه
+              print("⚠️ Using fallback blue icon.")
               for density, size in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
-                  img = Image.new('RGBA', (size, size), (30, 30, 30, 255)) # آیکون خاکستری تیره
+                  img = Image.new('RGBA', (size, size), (109, 94, 252, 255)) # رنگ بنفش/آبی
                   img.save(f'app/src/main/res/mipmap-{density}/ic_launcher.png', 'PNG')
-              img = Image.new('RGBA', (108, 108), (30, 30, 30, 255))
+              img = Image.new('RGBA', (108, 108), (109, 94, 252, 255))
               img.save('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'PNG')
 
           with open('app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml', 'w') as f:
