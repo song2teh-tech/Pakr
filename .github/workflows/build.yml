@@ -9,7 +9,7 @@ on:
         description: 'نام برنامه'
         required: true
       icon:
-        description: 'لینک مستقیم آیکون (حتماً به .jpg یا .png ختم شود)'
+        description: 'لینک مستقیم آیکون (jpg یا png)'
         required: false
 
 jobs:
@@ -46,19 +46,22 @@ jobs:
           from PIL import Image
           from io import BytesIO
           
-          # پاکسازی
           shutil.rmtree('app', ignore_errors=True)
           if os.path.exists('build.gradle'): os.remove('build.gradle')
           if os.path.exists('settings.gradle'): os.remove('settings.gradle')
           
           os.makedirs('app/src/main/java/com/myapp')
+          os.makedirs('app/src/main/res/mipmap-anydpi-v26')
+          os.makedirs('app/src/main/res/values')
           os.makedirs('app/src/main/res/mipmap-hdpi')
+          os.makedirs('app/src/main/res/mipmap-xhdpi')
+          os.makedirs('app/src/main/res/mipmap-xxhdpi')
+          os.makedirs('app/src/main/res/mipmap-xxxhdpi')
           
           url = os.environ['URL']
           name = os.environ['NAME']
           icon = os.environ['ICON']
           
-          # ساخت فایل‌های پروژه
           with open('settings.gradle', 'w') as f: f.write(textwrap.dedent("""
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
@@ -83,46 +86,93 @@ jobs:
           with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(textwrap.dedent(f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:label="{name}" android:icon="@mipmap/ic_launcher" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+              <application android:label="{name}" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
                   </activity>
               </application>
           </manifest>""").strip())
           
+          # تنظیمات WebView برای اجازه دادن به بارگذاری تصاویر HTTP در صفحات HTTPS
           with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(textwrap.dedent(f"""
           package com.myapp;
-          import android.os.Bundle; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import androidx.appcompat.app.AppCompatActivity;
+
           public class MainActivity extends AppCompatActivity {{
-              @Override protected void onCreate(Bundle s) {{
-                  super.onCreate(s);
-                  WebView w = new WebView(this); w.getSettings().setJavaScriptEnabled(true); w.setWebViewClient(new WebViewClient());
-                  setContentView(w); w.loadUrl("{url}");
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {{
+                  super.onCreate(savedInstanceState);
+                  WebView webView = new WebView(this);
+                  WebSettings webSettings = webView.getSettings();
+                  webSettings.setJavaScriptEnabled(true);
+                  webSettings.setDomStorageEnabled(true);
+                  
+                  // حل مشکل نمایش نشدن تصاویر در اندروید ۵ به بالا
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {{
+                      webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  }}
+                  
+                  webView.setWebViewClient(new WebViewClient());
+                  setContentView(webView);
+                  webView.loadUrl("{url}");
               }}
           }}""").strip())
           
-          # 🚀 پردازش هوشمند آیکون
+          # پردازش آیکون و ساخت Adaptive Icon
           icon_saved = False
           if icon:
               try:
-                  headers = {'User-Agent': 'Mozilla/5.0'}
-                  response = requests.get(icon, headers=headers, timeout=10)
+                  headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                  response = requests.get(icon, headers=headers, timeout=15)
                   response.raise_for_status()
                   img = Image.open(BytesIO(response.content))
                   
-                  # تبدیل به RGBA و تغییر سایز به استاندارد 192x192
-                  img = img.convert('RGBA')
-                  img = img.resize((192, 192), Image.Resampling.LANCZOS)
-                  img.save('app/src/main/res/mipmap-hdpi/ic_launcher.png', 'PNG')
+                  # ساخت آیکون‌های legacy در سایزهای مختلف
+                  for density, size in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
+                      resized_img = img.convert('RGBA').resize((size, size), Image.Resampling.LANCZOS)
+                      resized_img.save(f'app/src/main/res/mipmap-{density}/ic_launcher.png', 'PNG')
+                  
+                  # ساخت آیکون تطبیقی برای اندروید ۸ به بالا
+                  foreground = img.convert('RGBA')
+                  padding = int(108 * 0.25)  # 25% حاشیه امن
+                  new_size = 108 + 2 * padding
+                  new_foreground = Image.new('RGBA', (new_size, new_size), (0, 0, 0, 0))
+                  new_foreground.paste(foreground, (padding, padding), foreground)
+                  new_foreground = new_foreground.resize((108, 108), Image.Resampling.LANCZOS)
+                  new_foreground.save('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'PNG')
+                  
                   icon_saved = True
                   print("✅ Icon downloaded and processed successfully!")
               except Exception as e:
                   print(f"⚠️ Icon processing failed: {e}")
           
           if not icon_saved:
-              print("⚠️ Using fallback icon.")
-              # اگر همه چیز شکست خورد، یک آیکون پیش‌فرض (ربات اندروید) می‌سازد
-              open('app/src/main/res/mipmap-hdpi/ic_launcher.png', 'wb').write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82')
+              # ساخت یک آیکون پیش‌فرض ساده در صورت عدم موفقیت
+              for density, size in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
+                  img = Image.new('RGBA', (size, size), (255, 255, 255, 255)) # سفید
+                  img.save(f'app/src/main/res/mipmap-{density}/ic_launcher.png', 'PNG')
+              img = Image.new('RGBA', (108, 108), (255, 255, 255, 255))
+              img.save('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'PNG')
+
+          # ساخت فایل XML برای آیکون تطبیقی
+          with open('app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml', 'w') as f:
+              f.write(textwrap.dedent("""<?xml version="1.0" encoding="utf-8"?>
+              <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+                  <background android:drawable="@android:color/transparent" />
+                  <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+              </adaptive-icon>""").strip())
+
+          # کپی کردن آیکون foreground برای سایر تراکم‌ها (برای اطمینان)
+          shutil.copy('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png')
+          shutil.copy('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png')
+          shutil.copy('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png')
+          shutil.copy('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png')
+          
           PY
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
