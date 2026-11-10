@@ -24,9 +24,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # اینجا نسخه به v4 تغییر کرد تا مشکل لایسنس حل شود
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
+
+      # 🔥 نصب اجباری Gradle نسخه 8.0 قبل از هر کاری
+      - name: Setup Gradle 8.0
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.0'
 
       - name: Create clean project structure
         env:
@@ -37,7 +42,7 @@ jobs:
           python3 - <<'PY'
           import os, shutil
           
-          # پاکسازی کامل تمام فایل‌های قبلی برای جلوگیری از هرگونه تداخل
+          # پاکسازی کامل
           shutil.rmtree('app', ignore_errors=True)
           if os.path.exists('build.gradle'): os.remove('build.gradle')
           if os.path.exists('settings.gradle'): os.remove('settings.gradle')
@@ -49,7 +54,6 @@ jobs:
           name = os.environ['NAME']
           icon = os.environ['ICON']
           
-          # 1. ساخت فایل settings.gradle
           settings = """
           pluginManagement {
               repositories {
@@ -70,11 +74,9 @@ jobs:
           """
           with open('settings.gradle', 'w') as f: f.write(settings)
           
-          # 2. ساخت فایل build.gradle اصلی (مطابق با AGP 8.1.4)
           with open('build.gradle', 'w') as f:
               f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
           
-          # 3. ساخت فایل build.gradle اپلیکیشن
           app_gradle = """
           plugins { id 'com.android.application' }
           android {
@@ -88,7 +90,6 @@ jobs:
           """
           with open('app/build.gradle', 'w') as f: f.write(app_gradle)
           
-          # 4. ساخت AndroidManifest.xml
           manifest = f"""
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -102,7 +103,6 @@ jobs:
           """
           with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(manifest)
           
-          # 5. ساخت MainActivity.java
           activity = f"""
           package com.myapp;
           import android.os.Bundle; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity;
@@ -116,11 +116,9 @@ jobs:
           """
           with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(activity)
           
-          # 6. مدیریت آیکون
           if icon:
               os.system(f'curl -sL "{icon}" -o app/src/main/res/mipmap-hdpi/ic_launcher.png')
           if not os.path.exists('app/src/main/res/mipmap-hdpi/ic_launcher.png') or os.path.getsize('app/src/main/res/mipmap-hdpi/ic_launcher.png') == 0:
-              # اگر عکسی دانلود نشد، یک پیکسل شفاف به عنوان پیش‌فرض قرار می‌دهد تا بیلد نشکند
               open('app/src/main/res/mipmap-hdpi/ic_launcher.png', 'wb').write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82')
           PY
           echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -132,14 +130,9 @@ jobs:
           KA: ${{ secrets.KEY_ALIAS }}
           KKP: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # 1. تنظیم Gradle Wrapper روی نسخه 8.0 (دقیقاً سازگار با AGP 8.1.4)
-          gradle wrapper --gradle-version 8.0
-          chmod +x ./gradlew
+          # استفاده از Gradle که الان نسخه 8.0 است
+          gradle assembleRelease
           
-          # 2. ساخت فایل APK
-          ./gradlew assembleRelease
-          
-          # 3. آماده‌سازی امضا
           if [ -n "$KS" ]; then
             echo "$KS" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1 | base64 -d > k.keystore
             P="$KP"; A="$KA"; PP="$KKP"
@@ -148,7 +141,6 @@ jobs:
             P="android"; A="d"; PP="android"
           fi
           
-          # 4. امضای نهایی
           BT=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
           APK_PATH=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
           
