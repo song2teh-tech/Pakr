@@ -43,7 +43,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, shutil, textwrap, requests, urllib3
-          from PIL import Image, ImageDraw, ImageFont
+          from PIL import Image
           from io import BytesIO
           
           urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -53,7 +53,6 @@ jobs:
           if os.path.exists('settings.gradle'): os.remove('settings.gradle')
           
           os.makedirs('app/src/main/java/com/myapp')
-          os.makedirs('app/src/main/res/mipmap-anydpi-v26')
           for d in ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']:
               os.makedirs(f'app/src/main/res/mipmap-{d}', exist_ok=True)
           
@@ -82,14 +81,13 @@ jobs:
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
           """).strip())
           
-          # 🔥 حل مشکل عکس‌های سایت با اضافه کردن usesCleartextTraffic
+          # حذف کامل آیکون تطبیقی (مشکل مشکی شدن)
           with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(textwrap.dedent(f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <application 
                   android:label="{name}" 
                   android:icon="@mipmap/ic_launcher" 
-                  android:roundIcon="@mipmap/ic_launcher" 
                   android:usesCleartextTraffic="true"
                   android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
@@ -98,7 +96,6 @@ jobs:
               </application>
           </manifest>""").strip())
           
-          # 🔥 تنظیمات کامل WebView برای لود شدن تمام عکس‌ها و اسکریپت‌ها
           with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(textwrap.dedent(f"""
           package com.myapp;
           import android.os.Build;
@@ -131,11 +128,14 @@ jobs:
               }}
           }}""").strip())
           
-          # پردازش آیکون با امنیت کامل
+          # پردازش آیکون: فقط PNG معمولی، بدون adaptive-icon
           icon_saved = False
           if icon:
               try:
-                  headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                  headers = {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                      'Referer': 'https://postimages.org/'
+                  }
                   response = requests.get(icon, headers=headers, timeout=15, verify=False)
                   response.raise_for_status()
                   img = Image.open(BytesIO(response.content))
@@ -144,37 +144,17 @@ jobs:
                       resized_img = img.convert('RGBA').resize((size, size), Image.Resampling.LANCZOS)
                       resized_img.save(f'app/src/main/res/mipmap-{density}/ic_launcher.png', 'PNG')
                   
-                  foreground = img.convert('RGBA')
-                  padding = int(108 * 0.25)
-                  new_size = 108 + 2 * padding
-                  new_foreground = Image.new('RGBA', (new_size, new_size), (0, 0, 0, 0))
-                  new_foreground.paste(foreground, (padding, padding), foreground)
-                  new_foreground = new_foreground.resize((108, 108), Image.Resampling.LANCZOS)
-                  new_foreground.save('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'PNG')
-                  
                   icon_saved = True
-                  print("✅ Icon downloaded and processed successfully!")
+                  print("✅ Icon downloaded and saved successfully!")
               except Exception as e:
                   print(f"⚠️ Icon processing failed: {e}")
           
           if not icon_saved:
-              # آیکون پیش‌فرض زیبا (آبی رنگ) به جای مربع سیاه
+              # آیکون پیش‌فرض بنفش (در صورت شکست دانلود)
               print("⚠️ Using fallback blue icon.")
               for density, size in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
-                  img = Image.new('RGBA', (size, size), (109, 94, 252, 255)) # رنگ بنفش/آبی
+                  img = Image.new('RGBA', (size, size), (109, 94, 252, 255))
                   img.save(f'app/src/main/res/mipmap-{density}/ic_launcher.png', 'PNG')
-              img = Image.new('RGBA', (108, 108), (109, 94, 252, 255))
-              img.save('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', 'PNG')
-
-          with open('app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml', 'w') as f:
-              f.write(textwrap.dedent("""<?xml version="1.0" encoding="utf-8"?>
-              <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-                  <background android:drawable="@android:color/transparent" />
-                  <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-              </adaptive-icon>""").strip())
-
-          for d in ['xxhdpi', 'xhdpi', 'hdpi', 'mdpi']:
-              shutil.copy('app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png', f'app/src/main/res/mipmap-{d}/ic_launcher_foreground.png')
           
           PY
           echo "sdk.dir=$ANDROID_HOME" > local.properties
