@@ -9,7 +9,7 @@ on:
         description: 'App Name (English)'
         required: true
       icon_url:
-        description: 'Icon Image URL (Direct link to .png or .jpg)'
+        description: 'Icon Image URL (optional, direct link)'
         required: false
         default: ''
 
@@ -17,67 +17,52 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-java@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: temurin
-          
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
-      - name: Clean and Create Java Project from scratch
+          distribution: 'temurin'
+
+      - name: Clean old files and generate standard Android project
+        env:
+          IN_APP_URL: ${{ github.event.inputs.app_url }}
+          IN_APP_NAME: ${{ github.event.inputs.app_name }}
         run: |
-          # پاک کردن کامل پوشه app قدیمی
-          rm -rf app
-          mkdir -p app/src/main/java/com/myapp/webview
-          mkdir -p app/src/main/res/mipmap-hdpi
+          rm -rf app build.gradle settings.gradle gradle.properties gradlew gradlew.bat gradle
           
-          # 1. ساخت فایل AndroidManifest.xml
-          cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <application
-                  android:allowBackup="true"
-                  android:icon="@mipmap/ic_launcher"
-                  android:label="{{APP_NAME}}"
-                  android:supportsRtl="true"
-                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
+          mkdir -p app/src/main/java/com/myapp/webview
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p gradle/wrapper
+
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MyWebViewApp"
+          include ':app'
           EOF
 
-          # 2. ساخت فایل MainActivity.java (جاوا)
-          cat << 'EOF' > app/src/main/java/com/myapp/webview/MainActivity.java
-          package com.myapp.webview;
-          import android.os.Bundle;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-          import androidx.appcompat.app.AppCompatActivity;
-
-          public class MainActivity extends AppCompatActivity {
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  WebView webView = new WebView(this);
-                  webView.getSettings().setJavaScriptEnabled(true);
-                  webView.getSettings().setDomStorageEnabled(true);
-                  webView.setWebViewClient(new WebViewClient());
-                  setContentView(webView);
-                  webView.loadUrl("{{APP_URL}}");
-              }
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.1.4' apply false
           }
           EOF
 
-          # 3. ساخت فایل app/build.gradle
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -90,7 +75,7 @@ jobs:
                   minSdk 24
                   targetSdk 34
                   versionCode 1
-                  versionName "1.0"
+                  versionName "1.0.0"
               }
               buildTypes {
                   release {
@@ -107,64 +92,79 @@ jobs:
           }
           EOF
 
-          # 4. ساخت فایل settings.gradle
-          cat << 'EOF' > settings.gradle
-          rootProject.name = "MyWebViewApp"
-          include ':app'
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="__APP_NAME__"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
           EOF
 
-          # 5. بازنویسی build.gradle اصلی (root)
-          cat << 'EOF' > build.gradle
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.1.1'
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
+          cat << 'EOF' > app/src/main/java/com/myapp/webview/MainActivity.java
+          package com.myapp.webview;
+
+          import android.os.Bundle;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import androidx.appcompat.app.AppCompatActivity;
+
+          public class MainActivity extends AppCompatActivity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  WebView webView = new WebView(this);
+                  webView.getSettings().setJavaScriptEnabled(true);
+                  webView.getSettings().setDomStorageEnabled(true);
+                  webView.setWebViewClient(new WebViewClient());
+                  setContentView(webView);
+                  webView.loadUrl("__APP_URL__");
               }
           }
           EOF
 
-      - name: Inject App Name and URL
+          sed -i "s|__APP_URL__|$IN_APP_URL|g" app/src/main/java/com/myapp/webview/MainActivity.java
+          sed -i "s|__APP_NAME__|$IN_APP_NAME|g" app/src/main/AndroidManifest.xml
+
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Configure Gradle Wrapper
         run: |
-          python3 -c "
-          import os
-          app_name = os.environ['IN_APP_NAME']
-          app_url = os.environ['IN_APP_URL']
-          
-          for f in ['app/src/main/AndroidManifest.xml', 'app/src/main/java/com/myapp/webview/MainActivity.java']:
-              with open(f, 'r') as file: text = file.read()
-              text = text.replace('{{APP_NAME}}', app_name).replace('{{APP_URL}}', app_url)
-              with open(f, 'w') as file: file.write(text)
-          "
-        env:
-          IN_APP_NAME: ${{ github.event.inputs.app_name }}
-          IN_APP_URL: ${{ github.event.inputs.app_url }}
+          cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
 
-      - name: Process Icon (Optional)
+      - name: Handle Icon
         env:
           IN_ICON_URL: ${{ github.event.inputs.icon_url }}
         run: |
           if [ -n "$IN_ICON_URL" ]; then
-            wget -q "$IN_ICON_URL" -O app/src/main/res/mipmap-hdpi/ic_launcher.png || echo "Icon download failed, skipping."
+            curl -sSL -A "Mozilla/5.0" "$IN_ICON_URL" -o app/src/main/res/mipmap-hdpi/ic_launcher.png || true
           fi
-          # اگر آیکون دانلود نشد، یک آیکون پیش‌فرض می‌سازیم
-          if [ ! -f app/src/main/res/mipmap-hdpi/ic_launcher.png ]; then
+          if [ ! -s app/src/main/res/mipmap-hdpi/ic_launcher.png ]; then
             echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" | base64 -d > app/src/main/res/mipmap-hdpi/ic_launcher.png
           fi
 
-      - name: Build APK
+      - name: Build Release APK
         run: |
-          gradle wrapper --gradle-version 8.2
+          gradle wrapper --gradle-version 8.0
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Sign APK
         env:
@@ -175,24 +175,28 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             CLEAN_B64=$(echo "$KEYSTORE_BASE64" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1)
-            echo "$CLEAN_B64" | base64 --decode > /tmp/release.keystore
+            echo "$CLEAN_B64" | base64 --decode > release.keystore
             KS_PASS="$KEYSTORE_PASSWORD"
             ALIAS="$KEY_ALIAS"
             K_PASS="$KEY_PASSWORD"
           else
-            keytool -genkey -v -keystore /tmp/release.keystore -alias debugkey -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname "CN=Debug,O=Debug,C=US" -noprompt
+            keytool -genkey -v -keystore release.keystore -alias debugkey -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname "CN=Debug,O=Debug,C=US" -noprompt
             KS_PASS="android"; ALIAS="debugkey"; K_PASS="android"
           fi
           
           BUILD_TOOLS=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
-          mkdir -p /tmp/signed
-          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          mkdir -p signed_apk
           
-          $ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign -v -p 4 "$APK" /tmp/aligned.apk
-          $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign --ks /tmp/release.keystore --ks-pass "pass:$KS_PASS" --ks-key-alias "$ALIAS" --key-pass "pass:$K_PASS" --out /tmp/signed/app-release.apk /tmp/aligned.apk
+          UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          fi
+          
+          $ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign -v -p 4 "$UNSIGNED_APK" aligned.apk
+          $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign --ks release.keystore --ks-pass "pass:$KS_PASS" --ks-key-alias "$ALIAS" --key-pass "pass:$K_PASS" --out signed_apk/app-release.apk aligned.apk
 
-      - name: Upload APK
+      - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
           name: MyApp-APK
-          path: /tmp/signed/app-release.apk
+          path: signed_apk/app-release.apk
