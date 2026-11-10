@@ -130,20 +130,15 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "Using provided keystore..."
-            # استفاده از پایتون برای پیدا کردن رشته معتبر و نادیده گرفتن کلمات اضافی
-            python3 -c "
-import os, re, base64, sys
-s = os.environ.get('KEYSTORE_BASE64', '')
-# پیدا کردن طولانی‌ترین رشته Base64 (حداقل 100 کاراکتر)
-matches = re.findall(r'[A-Za-z0-9+/=]{100,}', s)
-if not matches:
-    print('Error: No valid base64 found in secret')
-    sys.exit(1)
-b64 = max(matches, key=len)
-b64 += '=' * (-len(b64) % 4)
-with open('/tmp/release.keystore', 'wb') as f:
-    f.write(base64.b64decode(b64))
-"
+            # این دستور جادویی فقط رشته اصلی کیستور را که با MII شروع می‌شود پیدا می‌کند
+            CLEAN_B64=$(echo "$KEYSTORE_BASE64" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1)
+            
+            if [ -z "$CLEAN_B64" ]; then
+               echo "Error: Could not find valid base64 keystore string in secret!"
+               exit 1
+            fi
+            
+            echo "$CLEAN_B64" | base64 --decode > /tmp/release.keystore
             KS_PASS="$KEYSTORE_PASSWORD"
             ALIAS="$KEY_ALIAS"
             K_PASS="$KEY_PASSWORD"
