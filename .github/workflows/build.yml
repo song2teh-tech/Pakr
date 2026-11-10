@@ -1,99 +1,48 @@
-name: Build APK
+name: Build Clean APK
 on:
   workflow_dispatch:
     inputs:
       app_url:
-        description: Target URL
+        description: 'Target URL (e.g. https://site.com)'
         required: true
       app_name:
-        description: App Name
+        description: 'App Name (English)'
         required: true
-      package_name:
-        description: Package Name
-        required: true
-      version_name:
-        description: Version Name
-        required: true
-        default: 1.0.0
       icon_url:
-        description: Icon Image URL (optional)
+        description: 'Icon Image URL (Direct link to .png or .jpg)'
         required: false
         default: ''
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
+      
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: temurin
-          cache: gradle
-
+          
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Rebuild all project files cleanly
-        env:
-          IN_APP_URL: ${{ github.event.inputs.app_url }}
-          IN_APP_NAME: ${{ github.event.inputs.app_name }}
-          IN_PACKAGE_NAME: ${{ github.event.inputs.package_name }}
-          IN_VERSION_NAME: ${{ github.event.inputs.version_name }}
+        uses: android-actions/setup-android@v3
+        
+      - name: Clean and Create Java Project from scratch
         run: |
-          python3 - <<'PY'
-          import os, shutil
-
-          app_url = os.environ['IN_APP_URL']
-          app_name = os.environ['IN_APP_NAME']
-          pkg = os.environ['IN_PACKAGE_NAME']
-          ver = os.environ['IN_VERSION_NAME']
-
-          # محاسبه Version Code از روی Version Name
-          parts = (ver.split('.') + ['0', '0', '0'])[:3]
-          try:
-              vc = int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2])
-          except ValueError:
-              vc = 1
-
-          # 1. پاک کردن پوشه‌های قدیمی برای جلوگیری از تداخل
-          if os.path.exists('app/src/main/java/com/webviewapp'):
-              shutil.rmtree('app/src/main/java/com/webviewapp')
-
-          # 2. ساخت مجدد MainActivity.kt
-          pkg_path = pkg.replace('.', '/')
-          os.makedirs(f'app/src/main/java/{pkg_path}', exist_ok=True)
-          main_activity = f"""package {pkg}
-          import android.os.Bundle
-          import android.webkit.WebView
-          import android.webkit.WebViewClient
-          import androidx.appcompat.app.AppCompatActivity
-
-          class MainActivity : AppCompatActivity() {{
-              override fun onCreate(savedInstanceState: Bundle?) {{
-                  super.onCreate(savedInstanceState)
-                  val webView = WebView(this)
-                  webView.settings.javaScriptEnabled = true
-                  webView.settings.domStorageEnabled = true
-                  webView.webViewClient = WebViewClient()
-                  setContentView(webView)
-                  webView.loadUrl("{app_url}")
-              }}
-          }}
-          """
-          with open(f'app/src/main/java/{pkg_path}/MainActivity.kt', 'w', encoding='utf-8') as f:
-              f.write(main_activity)
-
-          # 3. بازنویسی کامل AndroidManifest.xml (بدون هیچ تم خاصی)
-          manifest = f"""<?xml version="1.0" encoding="utf-8"?>
+          # پاک کردن کامل پوشه app قدیمی
+          rm -rf app
+          mkdir -p app/src/main/java/com/myapp/webview
+          mkdir -p app/src/main/res/mipmap-hdpi
+          
+          # 1. ساخت فایل AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <application
                   android:allowBackup="true"
                   android:icon="@mipmap/ic_launcher"
-                  android:label="{app_name}"
-                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="{{APP_NAME}}"
                   android:supportsRtl="true"
                   android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
@@ -104,86 +53,118 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          """
-          with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
-              f.write(manifest)
+          EOF
 
-          # 4. بازنویسی کامل strings.xml
-          strings = f"""<?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">{app_name}</string>
-          </resources>
-          """
-          with open('app/src/main/res/values/strings.xml', 'w', encoding='utf-8') as f:
-              f.write(strings)
+          # 2. ساخت فایل MainActivity.java (جاوا)
+          cat << 'EOF' > app/src/main/java/com/myapp/webview/MainActivity.java
+          package com.myapp.webview;
+          import android.os.Bundle;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import androidx.appcompat.app.AppCompatActivity;
 
-          # 5. بازنویسی کامل app/build.gradle (حل قطعی مشکل null)
-          gradle = f"""plugins {{
+          public class MainActivity extends AppCompatActivity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  WebView webView = new WebView(this);
+                  webView.getSettings().setJavaScriptEnabled(true);
+                  webView.getSettings().setDomStorageEnabled(true);
+                  webView.setWebViewClient(new WebViewClient());
+                  setContentView(webView);
+                  webView.loadUrl("{{APP_URL}}");
+              }
+          }
+          EOF
+
+          # 3. ساخت فایل app/build.gradle
+          cat << 'EOF' > app/build.gradle
+          plugins {
               id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
-          }}
-
-          android {{
-              namespace '{pkg}'
+          }
+          android {
+              namespace 'com.myapp.webview'
               compileSdk 34
-
-              defaultConfig {{
-                  applicationId "{pkg}"
+              defaultConfig {
+                  applicationId "com.myapp.webview"
                   minSdk 24
                   targetSdk 34
-                  versionCode {vc}
-                  versionName "{ver}"
-              }}
-
-              buildTypes {{
-                  release {{
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
                       minifyEnabled false
-                  }}
-              }}
-              compileOptions {{
+                  }
+              }
+              compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
-              }}
-              kotlinOptions {{
-                  jvmTarget = '17'
-              }}
-          }}
-
-          dependencies {{
+              }
+          }
+          dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'com.google.android.material:material:1.11.0'
-              implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-          }}
-          """
-          with open('app/build.gradle', 'w', encoding='utf-8') as f:
-              f.write(gradle)
-          PY
+          }
+          EOF
 
-      - name: Ensure fallback launcher resources
+          # 4. ساخت فایل settings.gradle
+          cat << 'EOF' > settings.gradle
+          rootProject.name = "MyWebViewApp"
+          include ':app'
+          EOF
+
+          # 5. بازنویسی build.gradle اصلی (root)
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.1'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+      - name: Inject App Name and URL
         run: |
-          python3 - <<'PY'
-          import base64, os
-          png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAAWUlEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAfgx1lAABqFDyOQAAAABJRU5ErkJggg==')
-          for density in ['mdpi','hdpi','xhdpi','xxhdpi','xxxhdpi']:
-              base = f'app/src/main/res/mipmap-{density}'
-              os.makedirs(base, exist_ok=True)
-              for name in ['ic_launcher.png', 'ic_launcher_round.png']:
-                  path = os.path.join(base, name)
-                  if not os.path.exists(path) or os.path.getsize(path) < 100:
-                      open(path, 'wb').write(png)
-          PY
-
-      - name: Process icon
+          python3 -c "
+          import os
+          app_name = os.environ['IN_APP_NAME']
+          app_url = os.environ['IN_APP_URL']
+          
+          for f in ['app/src/main/AndroidManifest.xml', 'app/src/main/java/com/myapp/webview/MainActivity.java']:
+              with open(f, 'r') as file: text = file.read()
+              text = text.replace('{{APP_NAME}}', app_name).replace('{{APP_URL}}', app_url)
+              with open(f, 'w') as file: file.write(text)
+          "
         env:
-          ICON_URL: ${{ github.event.inputs.icon_url }}
-        run: |
-          pip install Pillow -q
-          python3 Scripts/process_icon.py
+          IN_APP_NAME: ${{ github.event.inputs.app_name }}
+          IN_APP_URL: ${{ github.event.inputs.app_url }}
 
-      - name: Build APK (arm64 + armeabi-v7a)
+      - name: Process Icon (Optional)
+        env:
+          IN_ICON_URL: ${{ github.event.inputs.icon_url }}
         run: |
+          if [ -n "$IN_ICON_URL" ]; then
+            wget -q "$IN_ICON_URL" -O app/src/main/res/mipmap-hdpi/ic_launcher.png || echo "Icon download failed, skipping."
+          fi
+          # اگر آیکون دانلود نشد، یک آیکون پیش‌فرض می‌سازیم
+          if [ ! -f app/src/main/res/mipmap-hdpi/ic_launcher.png ]; then
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" | base64 -d > app/src/main/res/mipmap-hdpi/ic_launcher.png
+          fi
+
+      - name: Build APK
+        run: |
+          gradle wrapper --gradle-version 8.2
           chmod +x ./gradlew
-          ./gradlew clean assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
       - name: Sign APK
         env:
@@ -191,8 +172,6 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          IN_APP_NAME: ${{ github.event.inputs.app_name }}
-          IN_VERSION_NAME: ${{ github.event.inputs.version_name }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             CLEAN_B64=$(echo "$KEYSTORE_BASE64" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1)
@@ -202,41 +181,18 @@ jobs:
             K_PASS="$KEY_PASSWORD"
           else
             keytool -genkey -v -keystore /tmp/release.keystore -alias debugkey -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname "CN=Debug,O=Debug,C=US" -noprompt
-            KS_PASS="android"
-            ALIAS="debugkey"
-            K_PASS="android"
+            KS_PASS="android"; ALIAS="debugkey"; K_PASS="android"
           fi
           
           BUILD_TOOLS=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
-          SAFE=$(printf '%s' "$IN_APP_NAME" | tr -c 'A-Za-z0-9_-' '_')
-          VER="$IN_VERSION_NAME"
           mkdir -p /tmp/signed
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
           
-          FOUND=0
-          while IFS= read -r APK; do
-            [ -z "$APK" ] && continue
-            ABI=$(echo "$APK" | grep -oE 'arm64-v8a|armeabi-v7a' | head -1)
-            [ -z "$ABI" ] && continue
-            OUT="/tmp/signed/${SAFE}_${VER}_${ABI}.apk"
-            $ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign -v -p 4 "$APK" /tmp/aligned_${ABI}.apk
-            $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign --ks /tmp/release.keystore --ks-pass "pass:$KS_PASS" --ks-key-alias "$ALIAS" --key-pass "pass:$K_PASS" --out "$OUT" /tmp/aligned_${ABI}.apk
-            FOUND=1
-          done < <(find app/build -type f \( -name '*arm64-v8a*release*.apk' -o -name '*armeabi-v7a*release*.apk' -o -path '*/release/*arm64-v8a*.apk' -o -path '*/release/*armeabi-v7a*.apk' \) 2>/dev/null)
-          
-          if [ "$FOUND" -ne 1 ]; then exit 1; fi
-          echo "SIGNED_DIR=/tmp/signed" >> $GITHUB_ENV
-          echo "APK_NAME=${SAFE}_${VER}" >> $GITHUB_ENV
+          $ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign -v -p 4 "$APK" /tmp/aligned.apk
+          $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign --ks /tmp/release.keystore --ks-pass "pass:$KS_PASS" --ks-key-alias "$ALIAS" --key-pass "pass:$K_PASS" --out /tmp/signed/app-release.apk /tmp/aligned.apk
 
-      - name: Upload arm64 APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APK_NAME }}_arm64-v8a
-          path: ${{ env.SIGNED_DIR }}/*arm64-v8a*.apk
-          retention-days: 1
-
-      - name: Upload armeabi-v7a APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APK_NAME }}_armeabi-v7a
-          path: ${{ env.SIGNED_DIR }}/*armeabi-v7a*.apk
-          retention-days: 1
+          name: MyApp-APK
+          path: /tmp/signed/app-release.apk
