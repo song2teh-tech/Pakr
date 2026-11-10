@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
@@ -44,19 +45,47 @@ jobs:
           name = os.environ['NAME']
           icon = os.environ['ICON']
           
-          with open('settings.gradle', 'w') as f: f.write("rootProject.name = 'App'\ninclude ':app'")
-          with open('build.gradle', 'w') as f: f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
-          with open('app/build.gradle', 'w') as f: f.write("""
+          # ساخت فایل settings.gradle با تعریف مخازن پلاگین (حل مشکل اصلی)
+          settings_code = """
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MyApp"
+          include ':app'
+          """
+          with open('settings.gradle', 'w') as f: f.write(settings_code)
+          
+          # ساخت فایل build.gradle اصلی
+          with open('build.gradle', 'w') as f: 
+              f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
+          
+          # ساخت فایل build.gradle مربوط به اپ
+          app_gradle = """
           plugins { id 'com.android.application' }
           android {
               namespace 'com.myapp'
               compileSdk 34
               defaultConfig { applicationId "com.myapp"; minSdk 24; targetSdk 34; versionCode 1; versionName "1.0" }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
           }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
-          """)
+          """
+          with open('app/build.gradle', 'w') as f: f.write(app_gradle)
           
-          with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(f"""
+          # ساخت مانیفست
+          manifest = f"""
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -66,9 +95,11 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          """)
+          """
+          with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(manifest)
           
-          with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(f"""
+          # ساخت اکتیویتی جاوا
+          activity = f"""
           package com.myapp;
           import android.os.Bundle; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity;
           public class MainActivity extends AppCompatActivity {{
@@ -78,8 +109,10 @@ jobs:
                   setContentView(w); w.loadUrl("{url}");
               }}
           }}
-          """)
+          """
+          with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(activity)
           
+          # مدیریت آیکون
           if icon:
               os.system(f'curl -sL "{icon}" -o app/src/main/res/mipmap-hdpi/ic_launcher.png')
           if not os.path.exists('app/src/main/res/mipmap-hdpi/ic_launcher.png'):
@@ -95,6 +128,7 @@ jobs:
           KKP: ${{ secrets.KEY_PASSWORD }}
         run: |
           gradle wrapper --gradle-version 8.0 && chmod +x gradlew && ./gradlew assembleRelease
+          
           if [ -n "$KS" ]; then
             echo "$KS" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1 | base64 -d > k.keystore
             P="$KP"; A="$KA"; PP="$KKP"
@@ -102,8 +136,11 @@ jobs:
             keytool -genkey -v -keystore k.keystore -alias d -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname "CN=D" -noprompt
             P="android"; A="d"; PP="android"
           fi
+          
           BT=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
-          $ANDROID_HOME/build-tools/$BT/zipalign -v -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          APK_PATH=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          
+          $ANDROID_HOME/build-tools/$BT/zipalign -v -p 4 "$APK_PATH" aligned.apk
           $ANDROID_HOME/build-tools/$BT/apksigner sign --ks k.keystore --ks-pass "pass:$P" --ks-key-alias "$A" --key-pass "pass:$PP" --out final.apk aligned.apk
       
       - name: Upload APK
