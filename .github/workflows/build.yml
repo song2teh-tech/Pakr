@@ -9,7 +9,7 @@ on:
         description: 'نام برنامه'
         required: true
       icon:
-        description: 'لینک آیکون (اختیاری)'
+        description: 'لینک مستقیم آیکون (حتماً به .jpg یا .png ختم شود)'
         required: false
 
 jobs:
@@ -32,6 +32,9 @@ jobs:
         with:
           gradle-version: '8.0'
 
+      - name: Install Pillow for Icon processing
+        run: pip install Pillow requests
+
       - name: Create clean project structure
         env:
           URL: ${{ github.event.inputs.url }}
@@ -39,9 +42,11 @@ jobs:
           ICON: ${{ github.event.inputs.icon }}
         run: |
           python3 - <<'PY'
-          import os, shutil, textwrap
+          import os, shutil, textwrap, requests
+          from PIL import Image
+          from io import BytesIO
           
-          # پاکسازی کامل
+          # پاکسازی
           shutil.rmtree('app', ignore_errors=True)
           if os.path.exists('build.gradle'): os.remove('build.gradle')
           if os.path.exists('settings.gradle'): os.remove('settings.gradle')
@@ -53,30 +58,17 @@ jobs:
           name = os.environ['NAME']
           icon = os.environ['ICON']
           
-          settings = textwrap.dedent("""
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
+          # ساخت فایل‌های پروژه
+          with open('settings.gradle', 'w') as f: f.write(textwrap.dedent("""
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "MyApp"
           include ':app'
-          """).strip()
-          with open('settings.gradle', 'w') as f: f.write(settings)
+          """).strip())
           
-          with open('build.gradle', 'w') as f:
-              f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
+          with open('build.gradle', 'w') as f: f.write("plugins { id 'com.android.application' version '8.1.4' apply false }")
           
-          app_gradle = textwrap.dedent("""
+          with open('app/build.gradle', 'w') as f: f.write(textwrap.dedent("""
           plugins { id 'com.android.application' }
           android {
               namespace 'com.myapp'
@@ -86,11 +78,9 @@ jobs:
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
           }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
-          """).strip()
-          with open('app/build.gradle', 'w') as f: f.write(app_gradle)
+          """).strip())
           
-          # حل مشکل خطای XML با strip() تا خط اول خالی نباشد
-          manifest = textwrap.dedent(f"""<?xml version="1.0" encoding="utf-8"?>
+          with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(textwrap.dedent(f"""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <application android:label="{name}" android:icon="@mipmap/ic_launcher" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
@@ -98,11 +88,9 @@ jobs:
                       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
                   </activity>
               </application>
-          </manifest>
-          """).strip()
-          with open('app/src/main/AndroidManifest.xml', 'w') as f: f.write(manifest)
+          </manifest>""").strip())
           
-          activity = textwrap.dedent(f"""
+          with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(textwrap.dedent(f"""
           package com.myapp;
           import android.os.Bundle; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity;
           public class MainActivity extends AppCompatActivity {{
@@ -111,13 +99,29 @@ jobs:
                   WebView w = new WebView(this); w.getSettings().setJavaScriptEnabled(true); w.setWebViewClient(new WebViewClient());
                   setContentView(w); w.loadUrl("{url}");
               }}
-          }}
-          """).strip()
-          with open('app/src/main/java/com/myapp/MainActivity.java', 'w') as f: f.write(activity)
+          }}""").strip())
           
+          # 🚀 پردازش هوشمند آیکون
+          icon_saved = False
           if icon:
-              os.system(f'curl -sL "{icon}" -o app/src/main/res/mipmap-hdpi/ic_launcher.png')
-          if not os.path.exists('app/src/main/res/mipmap-hdpi/ic_launcher.png') or os.path.getsize('app/src/main/res/mipmap-hdpi/ic_launcher.png') == 0:
+              try:
+                  headers = {'User-Agent': 'Mozilla/5.0'}
+                  response = requests.get(icon, headers=headers, timeout=10)
+                  response.raise_for_status()
+                  img = Image.open(BytesIO(response.content))
+                  
+                  # تبدیل به RGBA و تغییر سایز به استاندارد 192x192
+                  img = img.convert('RGBA')
+                  img = img.resize((192, 192), Image.Resampling.LANCZOS)
+                  img.save('app/src/main/res/mipmap-hdpi/ic_launcher.png', 'PNG')
+                  icon_saved = True
+                  print("✅ Icon downloaded and processed successfully!")
+              except Exception as e:
+                  print(f"⚠️ Icon processing failed: {e}")
+          
+          if not icon_saved:
+              print("⚠️ Using fallback icon.")
+              # اگر همه چیز شکست خورد، یک آیکون پیش‌فرض (ربات اندروید) می‌سازد
               open('app/src/main/res/mipmap-hdpi/ic_launcher.png', 'wb').write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82')
           PY
           echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -129,7 +133,6 @@ jobs:
           KA: ${{ secrets.KEY_ALIAS }}
           KKP: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # استفاده از Gradle که الان نسخه 8.0 است
           gradle assembleRelease
           
           if [ -n "$KS" ]; then
