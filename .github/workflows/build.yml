@@ -130,9 +130,9 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "Using provided keystore..."
-            # پاکسازی کاراکترهای اضافی مثل Space و Enter از رشته Base64
-            CLEAN_B64=$(echo "$KEYSTORE_BASE64" | tr -d ' \n\r')
-            echo "$CLEAN_B64" | base64 -d > /tmp/release.keystore
+            # پاکسازی کامل کاراکترهای اضافی (فاصله، خط جدید، بازگشت خط)
+            CLEAN_B64=$(echo "$KEYSTORE_BASE64" | tr -d ' \n\r\t')
+            echo "$CLEAN_B64" | base64 --decode > /tmp/release.keystore
             KS_PASS="$KEYSTORE_PASSWORD"
             ALIAS="$KEY_ALIAS"
             K_PASS="$KEY_PASSWORD"
