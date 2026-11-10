@@ -16,7 +16,7 @@ on:
         required: true
         default: 1.0.0
       icon_url:
-        description: Icon Image URL (optional, leave empty to use repo logo.jpg)
+        description: Icon Image URL (optional)
         required: false
         default: ''
 jobs:
@@ -74,7 +74,6 @@ jobs:
               vc = 1
 
           replace_in_file('app/src/main/java/com/webviewapp/MainActivity.kt', {'{{APP_URL}}': app_url})
-          replace_in_file('app/src/main/AndroidManifest.xml', {'{{APP_PACKAGE}}': pkg, '{{APP_NAME}}': app_name})
           replace_in_file('app/build.gradle', {'{{APP_PACKAGE}}': pkg, '{{VERSION_NAME}}': ver, '{{VERSION_CODE}}': str(vc)})
           replace_in_file('app/src/main/res/values/strings.xml', {'{{APP_NAME}}': app_name})
 
@@ -89,6 +88,34 @@ jobs:
                   os.rename(fpath, os.path.join(f'app/src/main/java/{pkg_path}', fname))
 
           replace_in_file('app/src/main/res/layout/activity_main.xml', {'com.webviewapp': pkg})
+
+          # 🔥 این بخش جادویی است: مانیفست را به زور بازنویسی می‌کند تا مشکل تم حل شود
+          manifest_code = f"""<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="{app_name}"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
+                      android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          """
+          with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
+              f.write(manifest_code)
 
           print(f"PKG_PATH is: {pkg_path}")
           PY
@@ -130,20 +157,17 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "Using provided keystore..."
-            # این دستور جادویی فقط رشته اصلی کیستور را که با MII شروع می‌شود پیدا می‌کند
             CLEAN_B64=$(echo "$KEYSTORE_BASE64" | grep -oE 'MII[A-Za-z0-9+/=]+' | head -n 1)
-            
             if [ -z "$CLEAN_B64" ]; then
                echo "Error: Could not find valid base64 keystore string in secret!"
                exit 1
             fi
-            
             echo "$CLEAN_B64" | base64 --decode > /tmp/release.keystore
             KS_PASS="$KEYSTORE_PASSWORD"
             ALIAS="$KEY_ALIAS"
             K_PASS="$KEY_PASSWORD"
           else
-            echo "Generating debug keystore (No secrets provided)..."
+            echo "Generating debug keystore..."
             keytool -genkey -v -keystore /tmp/release.keystore -alias debugkey -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname "CN=Debug,O=Debug,C=US" -noprompt
             KS_PASS="android"
             ALIAS="debugkey"
@@ -155,36 +179,19 @@ jobs:
           VER="$IN_VERSION_NAME"
           mkdir -p /tmp/signed
           
-          echo "=== Searching for split APK files ==="
           FOUND=0
-          
           while IFS= read -r APK; do
             [ -z "$APK" ] && continue
-            echo "Processing: $APK"
             ABI=$(echo "$APK" | grep -oE 'arm64-v8a|armeabi-v7a' | head -1)
             [ -z "$ABI" ] && continue
             OUT="/tmp/signed/${SAFE}_${VER}_${ABI}.apk"
-            
             $ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign -v -p 4 "$APK" /tmp/aligned_${ABI}.apk
-            
-            $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign \
-              --ks /tmp/release.keystore \
-              --ks-pass "pass:$KS_PASS" \
-              --ks-key-alias "$ALIAS" \
-              --key-pass "pass:$K_PASS" \
-              --out "$OUT" /tmp/aligned_${ABI}.apk
-              
+            $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner sign --ks /tmp/release.keystore --ks-pass "pass:$KS_PASS" --ks-key-alias "$ALIAS" --key-pass "pass:$K_PASS" --out "$OUT" /tmp/aligned_${ABI}.apk
             $ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner verify "$OUT"
-            echo "Signed: $OUT"
             FOUND=1
           done < <(find app/build -type f \( -name '*arm64-v8a*release*.apk' -o -name '*armeabi-v7a*release*.apk' -o -path '*/release/*arm64-v8a*.apk' -o -path '*/release/*armeabi-v7a*.apk' \) 2>/dev/null)
           
-          if [ "$FOUND" -ne 1 ]; then
-            echo "No split ABI APKs found" >&2
-            exit 1
-          fi
-          
-          ls -la /tmp/signed/
+          if [ "$FOUND" -ne 1 ]; then exit 1; fi
           echo "SIGNED_DIR=/tmp/signed" >> $GITHUB_ENV
           echo "APK_NAME=${SAFE}_${VER}" >> $GITHUB_ENV
 
@@ -193,7 +200,6 @@ jobs:
         with:
           name: ${{ env.APK_NAME }}_arm64-v8a
           path: ${{ env.SIGNED_DIR }}/*arm64-v8a*.apk
-          if-no-files-found: warn
           retention-days: 1
 
       - name: Upload armeabi-v7a APK
@@ -201,5 +207,4 @@ jobs:
         with:
           name: ${{ env.APK_NAME }}_armeabi-v7a
           path: ${{ env.SIGNED_DIR }}/*armeabi-v7a*.apk
-          if-no-files-found: warn
           retention-days: 1
